@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"text/tabwriter"
 
 	"github.com/nordsieck/defect"
 )
@@ -42,7 +43,7 @@ var history = History{
 			TotalPoints: 8,
 			Competitions: []Result{
 				{
-					Role:   "follower",
+					Role:   "leader",
 					Points: 6,
 					Event:  Event{Name: "Sea to Sky", Location: "Tacoma, WA", Date: "November 2016"},
 					Result: "5",
@@ -86,7 +87,7 @@ func TestHistory_WriteTo(t *testing.T) {
 Novice: 8
 
 Event                     Location       Date           Result  Points  Role
-Sea to Sky                Tacoma, WA     November 2016  5       6       follower
+Sea to Sky                Tacoma, WA     November 2016  5       6       leader
 Swingtime in the Rockies  Denver, CO     July 2016      F       1       follower
 Wild Wild Westie          Dallas, Texas  July 2016      F       1       follower
 
@@ -122,7 +123,7 @@ func TestUnMarshalHistory(t *testing.T) {
       "division": {"id":4,"name":"Novice","abbreviation":"NOV"},
       "total_points":8,
       "competitions":[{
-        "role":"follower",
+        "role":"leader",
         "points":6,
         "event":{"id":79,"name":"Sea to Sky","location":"Tacoma, WA","url":"","date":"November 2016"},
         "result":"5"
@@ -152,4 +153,78 @@ func TestUnMarshalHistory(t *testing.T) {
 	err := json.NewDecoder(buff).Decode(&hist)
 	defect.Equal(t, err, nil)
 	defect.DeepEqual(t, hist, history)
+}
+
+func TestHistory_WriteSummaryTo(t *testing.T) {
+	expected := `12345 Amanda Johnson
+
+******************** West Coast Swing ********************
+
+Division  First          Last           Total  Role  1st  2nd  3rd  4th  5th  Final
+Novice    July 2016      November 2016  8      l                         1/6  
+                                               f                              2/2
+Newcomer  December 2015  December 2015  2      f                         1/2  
+
+`
+	buf := &bytes.Buffer{}
+	err := history.WriteSummaryTo(buf)
+	defect.Equal(t, err, nil)
+	defect.Equal(t, buf.String(), expected)
+}
+
+func TestDivision_Summary(t *testing.T) {
+	type Case struct {
+		d Division
+		s *DivisionSummary
+	}
+
+	cases := []Case{{
+		d: history.Placements[`West Coast Swing`][0],
+		s: &DivisionSummary{
+			Name:    `Novice`,
+			From:    `July 2016`,
+			To:      `November 2016`,
+			Total:   8,
+			Results: [2][6][2]int{{{}, {}, {}, {}, {1, 6}, {}}, {{}, {}, {}, {}, {}, {2, 2}}},
+		},
+	}, {
+		d: history.Placements[`West Coast Swing`][1],
+		s: &DivisionSummary{
+			Name:    `Newcomer`,
+			From:    `December 2015`,
+			To:      `December 2015`,
+			Total:   2,
+			Results: [2][6][2]int{{}, {{}, {}, {}, {}, {1, 2}, {}}},
+		},
+	}}
+
+	for _, c := range cases {
+		defect.DeepEqual(t, c.d.Summary(), c.s)
+	}
+}
+
+func TestDivisionSummary_WriteToTab(t *testing.T) {
+	cases := map[string]*DivisionSummary{
+		"Newcomer  December 2015  December 2015  2  f          1/2  \n": history.Placements[`West Coast Swing`][1].Summary(),
+		"Novice  January 2015  June 2015  29  l  2/25  1/4        \n": &DivisionSummary{
+			Name:    `Novice`,
+			From:    `January 2015`,
+			To:      `June 2015`,
+			Total:   29,
+			Results: [2][6][2]int{{{2, 25}, {1, 4}, {}, {}, {}, {}}, {}},
+		},
+		`Novice  July 2016  November 2016  8  l          1/6  
+                                     f               2/2
+`: history.Placements[`West Coast Swing`][0].Summary(),
+	}
+
+	for expected, ds := range cases {
+		buf := &bytes.Buffer{}
+		tw := tabwriter.NewWriter(buf, 0, 4, 2, ' ', 0)
+		err := ds.WriteToTab(tw)
+		tw.Flush()
+		defect.Equal(t, err, nil)
+		defect.Equal(t, buf.String(), expected)
+	}
+
 }
